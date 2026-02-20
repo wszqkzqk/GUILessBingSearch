@@ -56,7 +56,7 @@ Response format:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BING_ENSEARCH` | (auto) | `1` = international, `0` = domestic, unset = auto (by CJK detection) |
+| `BING_ENSEARCH` | (auto) | For `https://cn.bing.com`.`1` = international, `0` = domestic (Chinese), unset = auto (by CJK detection) |
 | `BING_BASE_URL` | `https://www.bing.com` | Base URL for Bing search |
 | `HOST` | `127.0.0.1` | Listen address |
 | `PORT` | `8765` | Listen port |
