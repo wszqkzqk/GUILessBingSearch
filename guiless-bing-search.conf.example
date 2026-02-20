@@ -1,0 +1,31 @@
+# Configuration file for GUI-Less Bing Search
+# Located at /etc/guiless-bing-search.conf
+# Enable and start the service with:
+#   systemctl enable --now guiless-bing-search
+
+# ensearch (for cn.bing.com): 1=force international, 0=force local, unset=auto (by CJK detection)
+#BING_ENSEARCH=
+
+# Base URL for Bing search
+#BING_BASE_URL=https://www.bing.com
+
+# Listen address and port
+HOST=127.0.0.1
+PORT=8765
+
+# Custom User-Agent (optional, default: auto-detected from WebEngine)
+#USER_AGENT=
+
+# Minimum seconds between searches (random jitter of 0-50% added automatically)
+SEARCH_INTERVAL=1
+
+# Bing _U cookie (optional, see README for when this is needed)
+#BING_U_COOKIE=
+
+# Additional cookies as JSON (optional)
+#BING_EXTRA_COOKIES={"MUID":"..."}
+
+# API key for Bearer token authentication (optional)
+# If set, clients must send "Authorization: Bearer <key>" header.
+# If empty or unset, no authentication is required.
+#API_KEY=

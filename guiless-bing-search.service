@@ -1,0 +1,15 @@
+[Unit]
+Description=GUI-Less Bing Search
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=io.github.wszqkzqk/guiless-bing-search
+EnvironmentFile=-/etc/guiless-bing-search.conf
+ExecStart=/usr/bin/guiless-bing-search
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
