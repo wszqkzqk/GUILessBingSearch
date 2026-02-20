@@ -14,6 +14,24 @@ Because no result links are fed back to Bing, the tool does not leak which resul
 - `pyside6`
 - `qt6-webengine`
 
+## Installation on Arch Linux
+
+This package is available on the [AUR](https://aur.archlinux.org/packages/guiless-bing-search). You can install it with an AUR helper such as `paru` or `yay`:
+
+```bash
+paru -S guiless-bing-search
+# or
+yay -S guiless-bing-search
+```
+
+After installation, you can edit the configuration file (optional) and then enable the service:
+
+```bash
+sudo systemctl enable --now guiless-bing-search
+```
+
+The service listens on `127.0.0.1:8765` by default. You can then query it via `curl` as shown in [Usage Examples](#usage-examples).
+
 ## Quick Start
 
 ```bash
