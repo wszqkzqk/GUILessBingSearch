@@ -40,15 +40,22 @@ jobs:
           EOF
           chmod 600 /root/.ssh/config
 
-      - name: Generate .SRCINFO
+      - name: Set up build user
         run: |
-          # makepkg cannot run as root, create a temp user
           useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+
+      - name: Build package and update pkgver
+        run: |
           mkdir -p /tmp/aur-build
           cp aur/PKGBUILD /tmp/aur-build/
           chown -R builder:builder /tmp/aur-build
           cd /tmp/aur-build
+          # Full build
+          su builder -c 'makepkg --syncdeps --noconfirm --clean'
+          # Generate .SRCINFO from the updated PKGBUILD (with correct pkgver)
           su builder -c 'makepkg --printsrcinfo' > .SRCINFO
+          echo "Updated pkgver: $(grep '^pkgver=' PKGBUILD)"
 
       - name: Push to AUR
         run: |
@@ -64,7 +71,8 @@ jobs:
 
           cd /tmp/aur-repo
 
-          cp "${GITHUB_WORKSPACE}/aur/PKGBUILD" .
+          # Copy the updated PKGBUILD and .SRCINFO
+          cp /tmp/aur-build/PKGBUILD .
           cp /tmp/aur-build/.SRCINFO .
 
           git add PKGBUILD .SRCINFO
