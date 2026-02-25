@@ -1,1 +1,1 @@
-PySide6>=6.0; python_version >= "3.10"
+playwright>=1.40.0; python_version >= "3.10"

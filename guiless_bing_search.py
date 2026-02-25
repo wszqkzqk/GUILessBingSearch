@@ -21,7 +21,7 @@
 """GUI-Less Bing Search.
 
 A tool for accessing Bing search results in environments without a
-graphical user interface, using Qt6 WebEngine (PySide6) as a headless
+graphical user interface, using Playwright as a headless
 Chromium browser engine.  Runs without GPU or display.
 
 Disclaimer: This tool is intended strictly for manual, interactive use via
@@ -33,19 +33,11 @@ Usage:
     python guiless_bing_search.py [--port 8765] [--host 127.0.0.1] [--api-key KEY]
 """
 
-import os
-import sys
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ.setdefault(
-    "QTWEBENGINE_CHROMIUM_FLAGS",
-    "--disable-gpu --disable-software-rasterizer",
-)
-
 import argparse
 import base64
 import json
 import logging
+import os
 import platform
 import queue
 import random
@@ -56,15 +48,7 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, quote_plus, urlparse
 
-from PySide6.QtCore import QUrl, QTimer, QObject
-from PySide6.QtNetwork import QNetworkCookie
-from PySide6.QtWebEngineCore import (
-    QWebEnginePage,
-    QWebEngineProfile,
-    QWebEngineScript,
-    QWebEngineSettings,
-)
-from PySide6.QtWidgets import QApplication
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 _VENDOR_ID = "io.github.wszqkzqk"
 _APP_NAME = "guiless-bing-search"
@@ -90,10 +74,9 @@ log = logging.getLogger("bing-search")
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
-# PySide6 runJavaScript cannot marshal JS objects directly;
-# we JSON.stringify on the JS side instead.
+# Playwright evaluate can return JS objects directly.
 _EXTRACT_JS = """\
-(function() {
+() => {
     var results = [];
     document.querySelectorAll('li.b_algo').forEach(function(li) {
         var a = li.querySelector('h2 a');
@@ -107,8 +90,8 @@ _EXTRACT_JS = """\
             snippet: p ? (p.textContent || '').trim() : ''
         });
     });
-    return JSON.stringify(results);
-})()
+    return results;
+}
 """
 
 # Normalize screen dimensions and chrome object for offscreen mode.
@@ -203,17 +186,6 @@ def _decode_bing_redirect(url: str) -> str:
     return url
 
 
-def _parse_js(data) -> list[dict]:
-    if isinstance(data, str) and data:
-        try:
-            return json.loads(data)
-        except json.JSONDecodeError:
-            pass
-    if isinstance(data, list):
-        return data
-    return []
-
-
 def _default_profile_dir() -> str:
     """Return platform-appropriate user data directory for this app.
 
@@ -236,105 +208,6 @@ def _default_profile_dir() -> str:
             os.path.join(os.path.expanduser("~"), ".local", "share"),
         )
     return os.path.join(base, _VENDOR_ID, _APP_NAME)
-
-
-class BingEngine(QObject):
-    """Navigate to Bing search URLs and extract results via QWebEnginePage."""
-
-    def __init__(self, profile: QWebEngineProfile):
-        super().__init__()
-        self._page = QWebEnginePage(profile, self)
-        self._page.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.AutoLoadImages, False,
-        )
-        self._page.settings().setAttribute(
-            QWebEngineSettings.WebAttribute.PluginsEnabled, False,
-        )
-
-        script = QWebEngineScript()
-        script.setSourceCode(_BROWSER_INIT_JS)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        script.setInjectionPoint(
-            QWebEngineScript.InjectionPoint.DocumentCreation,
-        )
-        script.setRunsOnSubFrames(True)
-        self._page.scripts().insert(script)
-
-        self._current: _SearchRequest | None = None
-        self._last_search_time: float = 0.0
-
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._poll)
-        self._timer.start(50)
-
-    def _poll(self):
-        if self._current is not None:
-            return
-        try:
-            self._current = _search_queue.get_nowait()
-        except queue.Empty:
-            return
-
-        # Enforce minimum interval with random jitter to avoid causing concentrated access pressure on the server
-        if SEARCH_INTERVAL > 0:
-            elapsed = time.monotonic() - self._last_search_time
-            jitter = random.uniform(0, SEARCH_INTERVAL * 0.5)
-            required = SEARCH_INTERVAL + jitter
-            if elapsed < required:
-                delay_ms = int((required - elapsed) * 1000)
-                QTimer.singleShot(delay_ms, self._start_search)
-                return
-
-        self._start_search()
-
-    def _start_search(self):
-        assert self._current is not None
-        self._last_search_time = time.monotonic()
-        log.info("Searching: '%s'", self._current.query)
-        self._navigate()
-
-    def _navigate(self):
-        assert self._current is not None
-        q = quote_plus(self._current.query)
-        ensearch_val, _ = _resolve_ensearch(self._current.query)
-        params = [f"q={q}"]
-        if ensearch_val:
-            params.append(f"ensearch={ensearch_val}")
-        url = f"{BING_BASE_URL}/search?{'&'.join(params)}"
-        self._page.loadFinished.connect(self._on_loaded)
-        self._page.load(QUrl(url))
-
-    def _on_loaded(self, ok: bool):
-        self._page.loadFinished.disconnect(self._on_loaded)
-        if not ok:
-            log.warning("Page load failed")
-            self._finish([])
-            return
-        QTimer.singleShot(800, self._extract)
-
-    def _extract(self):
-        self._page.runJavaScript(_EXTRACT_JS, 0, self._on_results)
-
-    def _on_results(self, data):
-        assert self._current is not None
-        results = _parse_js(data)
-        for r in results:
-            if "link" in r:
-                r["link"] = _decode_bing_redirect(r["link"])
-        self._finish(results[: self._current.count])
-
-    def _finish(self, results: list[dict]):
-        assert self._current is not None
-        req = self._current
-        self._current = None
-        req.results = results
-        req.done.set()
-        ensearch_val, mode = _resolve_ensearch(req.query)
-        tag = {"1": "intl", "0": "local"}.get(ensearch_val, "default")
-        log.info(
-            "Query '%s' -> %d results (%s, %s)",
-            req.query, len(results), tag, mode,
-        )
 
 
 def scrape_bing(query: str, count: int = 10) -> list[dict]:
@@ -410,53 +283,113 @@ class SearchHandler(BaseHTTPRequestHandler):
         self._send_json(results)
 
 
-def _inject_cookies(profile: QWebEngineProfile) -> None:
-    """Inject BING_U_COOKIE / BING_EXTRA_COOKIES into the cookie store."""
-    cookies: dict[str, str] = {}
-    if BING_U_COOKIE:
-        cookies["_U"] = BING_U_COOKIE
-    if BING_EXTRA_COOKIES:
-        try:
-            extra = json.loads(BING_EXTRA_COOKIES)
-            if isinstance(extra, dict):
-                cookies.update(extra)
-        except json.JSONDecodeError:
-            log.warning("BING_EXTRA_COOKIES is not valid JSON, ignored")
+def _run_playwright_worker(profile_dir: str):
+    last_search_time = 0.0
+    
+    with sync_playwright() as p:
+        # Prepare cookies
+        cookies = []
+        if BING_U_COOKIE:
+            cookies.append({
+                "name": "_U",
+                "value": BING_U_COOKIE,
+                "domain": ".bing.com",
+                "path": "/",
+                "secure": True
+            })
+        if BING_EXTRA_COOKIES:
+            try:
+                extra = json.loads(BING_EXTRA_COOKIES)
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        cookies.append({
+                            "name": k,
+                            "value": v,
+                            "domain": ".bing.com",
+                            "path": "/",
+                            "secure": True
+                        })
+            except json.JSONDecodeError:
+                log.warning("BING_EXTRA_COOKIES is not valid JSON, ignored")
 
-    store = profile.cookieStore()
-    for name, value in cookies.items():
-        c = QNetworkCookie(name.encode(), value.encode())
-        c.setDomain(".bing.com")
-        c.setPath("/")
-        c.setSecure(True)
-        store.setCookie(c)
+        # Launch browser
+        launch_args = {
+            "user_data_dir": profile_dir,
+            "headless": True,
+            "args": ["--disable-gpu", "--disable-software-rasterizer"],
+        }
+        if USER_AGENT:
+            launch_args["user_agent"] = USER_AGENT
+            
+        context = p.chromium.launch_persistent_context(**launch_args)
+        
+        if cookies:
+            context.add_cookies(cookies)
+            
+        page = context.new_page()
+        page.add_init_script(_BROWSER_INIT_JS)
+        
+        # Block unnecessary resources to speed up loading
+        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
 
+        log.info("Playwright worker started. UA: %s", page.evaluate("navigator.userAgent"))
+        log.info("Profile: %s", profile_dir)
 
-def _build_profile(
-    app: QApplication, profile_dir: str = "",
-) -> QWebEngineProfile:
-    """Create a persistent WebEngine profile with clean UA."""
-    profile = QWebEngineProfile("bing-search", app)
-
-    storage = profile_dir or _default_profile_dir()
-    profile.setPersistentStoragePath(storage)
-    profile.setCachePath(os.path.join(storage, "cache"))
-
-    if USER_AGENT:
-        profile.setHttpUserAgent(USER_AGENT)
-    else:
-        # Strip the QtWebEngine/x.y.z token from the default UA,
-        # keeping the real platform and Chrome version intact so that
-        # the UA matches the TLS fingerprint.
-        clean_ua = re.sub(r"\s*QtWebEngine/\S+", "", profile.httpUserAgent())
-        profile.setHttpUserAgent(clean_ua)
-
-    profile.setPersistentCookiesPolicy(
-        QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies,
-    )
-    log.info("UA: %s", profile.httpUserAgent())
-    log.info("Profile: %s", profile.persistentStoragePath())
-    return profile
+        while True:
+            try:
+                req = _search_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+                
+            if req is None:
+                break
+                
+            # Enforce interval
+            if SEARCH_INTERVAL > 0:
+                elapsed = time.monotonic() - last_search_time
+                jitter = random.uniform(0, SEARCH_INTERVAL * 0.5)
+                required = SEARCH_INTERVAL + jitter
+                if elapsed < required:
+                    time.sleep(required - elapsed)
+                    
+            last_search_time = time.monotonic()
+            log.info("Searching: '%s'", req.query)
+            
+            q = quote_plus(req.query)
+            ensearch_val, mode = _resolve_ensearch(req.query)
+            params = [f"q={q}"]
+            if ensearch_val:
+                params.append(f"ensearch={ensearch_val}")
+            url = f"{BING_BASE_URL}/search?{'&'.join(params)}"
+            
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                # Wait for results to appear
+                try:
+                    page.wait_for_selector("li.b_algo", timeout=5000)
+                except PlaywrightTimeoutError:
+                    log.warning("Timeout waiting for search results selector")
+                    
+                results = page.evaluate(_EXTRACT_JS)
+                
+                for r in results:
+                    if "link" in r:
+                        r["link"] = _decode_bing_redirect(r["link"])
+                        
+                req.results = results[:req.count]
+                
+                tag = {"1": "intl", "0": "local"}.get(ensearch_val, "default")
+                log.info(
+                    "Query '%s' -> %d results (%s, %s)",
+                    req.query, len(req.results), tag, mode,
+                )
+            except Exception as e:
+                log.error("Search failed: %s", e)
+                req.results = []
+            finally:
+                req.done.set()
+                
+        context.close()
 
 
 def main():
@@ -499,31 +432,12 @@ def main():
     if args.api_key is not None:
         API_KEY = args.api_key
 
-    # Ensure XDG_DATA_HOME points to a writable directory before
-    # QApplication / QWebEngineProfile constructors try to create
-    # their default storage paths.  Under systemd DynamicUser=yes the
-    # home is "/" and ~/.local/share is not writable.
     _storage = args.profile_dir or _default_profile_dir()
     os.makedirs(_storage, exist_ok=True)
-    if "XDG_DATA_HOME" not in os.environ:
-        os.environ["XDG_DATA_HOME"] = _storage
-
-    app = QApplication(sys.argv)
-    app.setApplicationName(_APP_NAME)
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: app.quit())
-    _sig_timer = QTimer()
-    _sig_timer.start(500)
-    _sig_timer.timeout.connect(lambda: None)
-
-    profile = _build_profile(app, _storage)
-    _inject_cookies(profile)
-
-    engine = BingEngine(profile)  # noqa: F841
 
     server = HTTPServer((args.host, args.port), SearchHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
 
     log.info("Listening on http://%s:%d", args.host, args.port)
     log.info(
@@ -533,11 +447,19 @@ def main():
         "enabled" if API_KEY else "disabled",
     )
 
+    def handle_sigterm(*_):
+        log.info("Received shutdown signal")
+        _search_queue.put(None)
+
+    signal.signal(signal.SIGINT, handle_sigterm)
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
     try:
-        app.exec()
+        _run_playwright_worker(_storage)
     finally:
         server.shutdown()
         server.server_close()
+        server_thread.join(timeout=2)
         log.info("Shutdown complete")
 
 

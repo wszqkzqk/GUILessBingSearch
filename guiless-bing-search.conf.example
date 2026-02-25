@@ -13,7 +13,7 @@
 HOST=127.0.0.1
 PORT=8765
 
-# Custom User-Agent (optional, default: auto-detected from WebEngine)
+# Custom User-Agent (optional, default: Playwright Chromium default)
 #USER_AGENT=
 
 # Minimum seconds between searches (random jitter of 0-50% added automatically)

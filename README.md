@@ -2,7 +2,7 @@
 
 An unofficial tool for accessing Bing search results in environments **without a graphical user interface**, built for personal study and research on headless information retrieval.
 
-In many server, container, or embedded environments there is no desktop or browser available, yet users still need to look up information on the web. This tool wraps Qt6 WebEngine (PySide6) as a headless Chromium engine and exposes a minimal HTTP API so that users can query Bing via `curl` or similar command-line utilities.
+In many server, container, or embedded environments there is no desktop or browser available, yet users still need to look up information on the web. This tool wraps Playwright as a headless Chromium engine and exposes a minimal HTTP API so that users can query Bing via `curl` or similar command-line utilities.
 
 Because no result links are fed back to Bing, the tool does not leak which results the user actually visited, offering a degree of privacy protection compared to using a regular browser.
 
@@ -11,8 +11,7 @@ Because no result links are fed back to Bing, the tool does not leak which resul
 ## Dependencies
 
 - `python>=3.10.0`
-- `pyside6`
-- `qt6-webengine`
+- `python-playwright`
 
 ## Installation on Arch Linux
 
