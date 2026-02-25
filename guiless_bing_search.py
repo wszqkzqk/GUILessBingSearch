@@ -332,6 +332,25 @@ def _run_playwright_worker(profile_dir: str):
         # Block unnecessary resources to speed up loading
         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
 
+        # Check if we need to login to Bing to avoid failures caused by redirects in China.
+        if os.environ.get("BING_LOGIN_EMAIL") and os.environ.get("BING_LOGIN_PASSWORD"):
+            log.info("Attempting to login to Bing...")
+            try:
+                page.goto("https://login.live.com/", wait_until="domcontentloaded", timeout=15000)
+                page.fill("input[type='email']", os.environ.get("BING_LOGIN_EMAIL"))
+                page.click("input[type='submit']")
+                page.wait_for_selector("input[type='password']", timeout=5000)
+                page.fill("input[type='password']", os.environ.get("BING_LOGIN_PASSWORD"))
+                page.click("input[type='submit']")
+                try:
+                    page.wait_for_selector("input[id='idBtn_Back']", timeout=5000)
+                    page.click("input[id='idBtn_Back']")
+                except PlaywrightTimeoutError:
+                    pass
+                log.info("Login successful.")
+            except Exception as e:
+                log.error("Login failed: %s", e)
+
         log.info("Playwright worker started. UA: %s", page.evaluate("navigator.userAgent"))
         log.info("Profile: %s", profile_dir)
 

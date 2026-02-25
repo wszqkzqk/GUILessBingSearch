@@ -25,6 +25,10 @@ SEARCH_INTERVAL=1
 # Additional cookies as JSON (optional)
 #BING_EXTRA_COOKIES={"MUID":"..."}
 
+# Bing Login (optional, for testing/research purposes to avoid cookie redirect issues)
+#BING_LOGIN_EMAIL=
+#BING_LOGIN_PASSWORD=
+
 # API key for Bearer token authentication (optional)
 # If set, clients must send "Authorization: Bearer <key>" header.
 # If empty or unset, no authentication is required.
