@@ -157,18 +157,20 @@ def _has_chinese(text: str) -> bool:
 
 
 def _resolve_ensearch(query: str) -> tuple[str, str]:
-    """Return (ensearch_value, mode) based on config or CJK content.
+    """Return (ensearch_url_value, mode_label).
 
-    ensearch=1 (international) is used for non-CJK queries,
-    ensearch=0 (domestic) for CJK queries, unless overridden.
+    Returns "1" for international or "" for domestic (real browsers
+    never send ensearch=0, they simply omit the parameter).
+    Auto mode: CJK queries -> domestic, otherwise -> international.
     """
     if BING_ENSEARCH == "1":
-        return "1", "forced"
+        return "1", "intl/forced"
     if BING_ENSEARCH == "0":
-        return "0", "forced"
+        return "", "local/forced"
+    # Auto: international for non-CJK, domestic for CJK
     if _has_chinese(query):
-        return "0", "auto"
-    return "1", "auto"
+        return "", "local/auto"
+    return "1", "intl/auto"
 
 
 def _decode_bing_redirect(url: str) -> str:
@@ -296,11 +298,14 @@ class BingEngine(QObject):
     def _navigate(self):
         assert self._current is not None
         q = quote_plus(self._current.query)
-        ensearch_val, _ = _resolve_ensearch(self._current.query)
-        params = [f"q={q}"]
-        if ensearch_val:
-            params.append(f"ensearch={ensearch_val}")
+        ensearch_param, mode = _resolve_ensearch(self._current.query)
+        # FORM codes from Bing's homepage: QBLHCN (intl), QBLH (domestic).
+        form_code = "QBLHCN" if ensearch_param == "1" else "QBLH"
+        params = [f"q={q}", f"FORM={form_code}"]
+        if ensearch_param:
+            params.append(f"ensearch={ensearch_param}")
         url = f"{BING_BASE_URL}/search?{'&'.join(params)}"
+        log.debug("navigate %s (%s)", url, mode)
         self._page.loadFinished.connect(self._on_loaded)
         self._page.load(QUrl(url))
 
@@ -310,7 +315,28 @@ class BingEngine(QObject):
             log.warning("Page load failed")
             self._finish([])
             return
-        QTimer.singleShot(800, self._extract)
+        self._poll_count = 0
+        QTimer.singleShot(200, self._probe)
+
+    # Poll DOM for li.b_algo (every 200 ms, up to 2 s).
+    _PROBE_JS = "document.querySelectorAll('li.b_algo').length"
+    _MAX_POLLS = 10
+    _POLL_MS = 200
+
+    def _probe(self):
+        self._poll_count += 1
+        self._page.runJavaScript(self._PROBE_JS, 0, self._on_probe)
+
+    def _on_probe(self, n):
+        n = int(n) if n else 0
+        if n > 0:
+            self._extract()
+        elif self._poll_count < self._MAX_POLLS:
+            QTimer.singleShot(self._POLL_MS, self._probe)
+        else:
+            log.warning("No results after %d polls, extracting anyway",
+                        self._poll_count)
+            self._extract()
 
     def _extract(self):
         self._page.runJavaScript(_EXTRACT_JS, 0, self._on_results)
@@ -329,11 +355,10 @@ class BingEngine(QObject):
         self._current = None
         req.results = results
         req.done.set()
-        ensearch_val, mode = _resolve_ensearch(req.query)
-        tag = {"1": "intl", "0": "local"}.get(ensearch_val, "default")
+        _, mode = _resolve_ensearch(req.query)
         log.info(
-            "Query '%s' -> %d results (%s, %s)",
-            req.query, len(results), tag, mode,
+            "Query '%s' -> %d results (%s)",
+            req.query, len(results), mode,
         )
 
 
