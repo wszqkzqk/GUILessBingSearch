@@ -311,7 +311,7 @@ class BingEngine(QObject):
         if ensearch_param:
             params.append(f"ensearch={ensearch_param}")
         url = f"{BING_BASE_URL}/search?{'&'.join(params)}"
-        log.debug("navigate %s (%s)", url, mode)
+        log.info("navigate %s (%s)", url, mode)
         self._page.loadFinished.connect(self._on_loaded)
         self._page.load(QUrl(url))
 
@@ -321,6 +321,7 @@ class BingEngine(QObject):
             log.warning("Page load failed")
             self._finish([])
             return
+        log.info("Page loaded: %s", self._page.url().toString())
         self._poll_count = 0
         QTimer.singleShot(200, self._probe)
 
