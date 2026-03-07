@@ -1,8 +1,10 @@
 # GUI-Less Bing Search
 
-An unofficial tool for accessing Bing search results in environments **without a graphical user interface**, built for personal study and research on headless information retrieval.
+An unofficial tool for accessing search results in environments **without a graphical user interface**, built for personal study and research on headless information retrieval.
 
-In many server, container, or embedded environments there is no desktop or browser available, yet users still need to look up information on the web. This tool wraps Qt6 WebEngine (PySide6) as a headless Chromium engine and exposes a minimal HTTP API so that users can query Bing via `curl` or similar command-line utilities.
+Supports **Bing** and **DuckDuckGo** search engines.
+
+In many server, container, or embedded environments there is no desktop or browser available, yet users still need to look up information on the web. This tool wraps Qt6 WebEngine (PySide6) as a headless Chromium engine and exposes a minimal HTTP API so that users can query search engines via `curl` or similar command-line utilities.
 
 Because no result links are fed back to Bing, the tool does not leak which results the user actually visited, offering a degree of privacy protection compared to using a regular browser.
 
@@ -38,13 +40,19 @@ The service listens on `127.0.0.1:8765` by default. You can then query it via `c
 # Start the service (headless, no display needed)
 python guiless_bing_search.py
 
+# Use DuckDuckGo
+python guiless_bing_search.py --engine duckduckgo
+
+# Prefer Bing and fall back to DuckDuckGo on empty/failed searches
+python guiless_bing_search.py --engine bing --fallback-engines duckduckgo
+
 # Custom profile directory
 python guiless_bing_search.py --profile-dir /path/to/profile
 ```
 
 ## Usage Examples
 
-Once the service is running, search Bing from the command line:
+Once the service is running, search from the command line:
 
 ```bash
 # Health check
@@ -59,7 +67,17 @@ curl -s -X POST http://localhost:8765/search \
 curl -s -X POST http://localhost:8765/search \
     -H "Content-Type: application/json" \
     -d '{"query": "Linux kernel", "count": 3}' | python -m json.tool
+
+# Force DuckDuckGo for a specific request
+curl -s -X POST http://localhost:8765/search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "Linux kernel", "engine": "duckduckgo", "count": 3}' | python -m json.tool
 ```
+
+When the selected engine returns no results or times out, the service tries the
+configured fallback engines in order. It does **not** attempt to detect
+"garbage results" yet, because that would require a query-quality heuristic
+that is easy to get wrong.
 
 Response format:
 
@@ -74,6 +92,8 @@ Response format:
 
 | Variable | Default | Description |
 |---|---|---|
+| `SEARCH_ENGINE` | `bing` | Primary search engine: `bing` or `duckduckgo` |
+| `SEARCH_FALLBACK_ENGINES` | (auto) | Comma-separated fallback engines, e.g. `duckduckgo` or `bing` |
 | `BING_ENSEARCH` | (auto) | For `https://cn.bing.com`.`1` = international, `0` = domestic (Chinese), unset = auto (by CJK detection) |
 | `BING_BASE_URL` | `https://www.bing.com` | Base URL for Bing search |
 | `HOST` | `127.0.0.1` | Listen address |
@@ -89,6 +109,8 @@ Response format:
 ```
 --host HOST           Listen address (default: 127.0.0.1)
 --port PORT           Listen port (default: 8765)
+--engine ENGINE       Search engine: bing, duckduckgo, ddg (default: bing)
+--fallback-engines S  Comma-separated fallback engines (default: auto)
 --profile-dir DIR     Custom profile directory
 --u-cookie COOKIE     Set _U cookie for Bing (see Cookie Troubleshooting)
 --base-url URL        Bing base URL

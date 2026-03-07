@@ -3,6 +3,12 @@
 # Enable and start the service with:
 #   systemctl enable --now guiless-bing-search
 
+# Search engine: "bing" or "duckduckgo" (default: bing)
+#SEARCH_ENGINE=bing
+
+# Comma-separated fallback engines (default: auto)
+#SEARCH_FALLBACK_ENGINES=duckduckgo
+
 # ensearch (for cn.bing.com): 1=force international, 0=force local, unset=auto (by CJK detection)
 #BING_ENSEARCH=
 
