@@ -360,6 +360,11 @@ class BingEngine(QObject):
             "Query '%s' -> %d results (%s)",
             req.query, len(results), mode,
         )
+        for i, r in enumerate(results, 1):
+            log.info(
+                "  [%d] %s | %s",
+                i, r.get("title", ""), r.get("link", ""),
+            )
 
 
 def scrape_bing(query: str, count: int = 10) -> list[dict]:
