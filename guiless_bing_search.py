@@ -245,7 +245,6 @@ class BingEngine(QObject):
 
     def __init__(self, profile: QWebEngineProfile):
         super().__init__()
-        self._profile = profile
         self._page = QWebEnginePage(profile, self)
         self._page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.AutoLoadImages, False,
@@ -254,14 +253,14 @@ class BingEngine(QObject):
             QWebEngineSettings.WebAttribute.PluginsEnabled, False,
         )
 
-        self._init_script = QWebEngineScript()
-        self._init_script.setSourceCode(_BROWSER_INIT_JS)
-        self._init_script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        self._init_script.setInjectionPoint(
+        script = QWebEngineScript()
+        script.setSourceCode(_BROWSER_INIT_JS)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setInjectionPoint(
             QWebEngineScript.InjectionPoint.DocumentCreation,
         )
-        self._init_script.setRunsOnSubFrames(True)
-        self._page.scripts().insert(self._init_script)
+        script.setRunsOnSubFrames(True)
+        self._page.scripts().insert(script)
 
         self._current: _SearchRequest | None = None
         self._last_search_time: float = 0.0
@@ -298,11 +297,6 @@ class BingEngine(QObject):
 
     def _navigate(self):
         assert self._current is not None
-
-        # Clear all cookies and rebuild the page so each search starts with a fresh session
-        self._profile.cookieStore().deleteAllCookies()
-        _inject_cookies(self._profile)
-
         q = quote_plus(self._current.query)
         ensearch_param, mode = _resolve_ensearch(self._current.query)
         # FORM codes from Bing's homepage: QBLHCN (intl), QBLH (domestic).
