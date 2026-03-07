@@ -469,12 +469,6 @@ def _build_profile(
 
     if USER_AGENT:
         profile.setHttpUserAgent(USER_AGENT)
-    else:
-        # Strip the QtWebEngine/x.y.z token from the default UA,
-        # keeping the real platform and Chrome version intact so that
-        # the UA matches the TLS fingerprint.
-        clean_ua = re.sub(r"\s*QtWebEngine/\S+", "", profile.httpUserAgent())
-        profile.setHttpUserAgent(clean_ua)
 
     profile.setPersistentCookiesPolicy(
         QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies,
