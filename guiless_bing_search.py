@@ -443,6 +443,7 @@ class SearchHandler(BaseHTTPRequestHandler):
             count = 5
         count = min(count, 30)
         log.info("Request: query='%s', count=%d", query, count)
+        log.info("Request headers:\n%s", self.headers)
         results = scrape_bing(query, count)
         self._send_json(results)
 
