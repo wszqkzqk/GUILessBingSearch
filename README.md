@@ -74,8 +74,8 @@ Response format:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BING_ENSEARCH` | (auto) | For `https://cn.bing.com`.`1` = international, `0` = domestic (Chinese), unset = auto (by CJK detection) |
-| `BING_BASE_URL` | `https://www.bing.com` | Base URL for Bing search |
+| `BING_ENSEARCH` | (auto) | `1` = force international, `0` = force domestic on cn.bing.com, unset = adaptive: add `ensearch=1` only when the base URL host is `cn.bing.com` |
+| `BING_BASE_URL` | `https://www.bing.com` | Base URL for Bing search. Outside mainland China, keep the default. If your network redirects `www.bing.com` to `cn.bing.com`, set this explicitly to `https://cn.bing.com` |
 | `HOST` | `127.0.0.1` | Listen address |
 | `PORT` | `8765` | Listen port |
 | `USER_AGENT` | (auto) | Custom User-Agent |
@@ -98,16 +98,22 @@ Response format:
 
 ## Cookie Troubleshooting
 
-In certain network environments (notably mainland China), accessing `bing.com` may involve complex redirects, which can leave the browser profile in a broken cookie state and cause searches to fail or return incorrect results.
+In certain network environments (notably mainland China), accessing `www.bing.com` may redirect to `cn.bing.com` or involve cookie-dependent routing, which can leave the browser profile in a broken state and cause searches to fail or return incorrect results.
 
 If you experience this problem, try one of the following:
 
 1. **Delete the profile directory** to start with a clean state.
-2. **Set `BING_U_COOKIE`** or `BING_EXTRA_COOKIES` to supply known-good
-   cookie values that resolve the redirect issue.
+2. **Set `BING_BASE_URL=https://cn.bing.com`** if your network reliably lands on the mainland endpoint and you want deterministic behavior.
+3. **Set `BING_U_COOKIE`** or `BING_EXTRA_COOKIES` to supply known-good cookie values that resolve the redirect issue.
 
 If your network can reach `bing.com` without issues, you do not need to
 set any cookie variables.
+
+By default, the program behaves as follows:
+
+1. If the base URL host is `www.bing.com`, it uses the normal international search flow and does not append `ensearch`.
+2. If the base URL host is `cn.bing.com`, it appends `ensearch=1` by default to stay on the international results path.
+3. If you set `BING_ENSEARCH=0`, it forces the domestic cn.bing.com mode.
 
 ## Profile Storage
 

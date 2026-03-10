@@ -3,10 +3,12 @@
 # Enable and start the service with:
 #   systemctl enable --now guiless-bing-search
 
-# ensearch (for cn.bing.com): 1=force international, 0=force local, unset=auto (by CJK detection)
+# ensearch: 1=force international, 0=force local on cn.bing.com,
+# unset=adaptive (only send ensearch=1 when BING_BASE_URL uses cn.bing.com)
 #BING_ENSEARCH=
 
-# Base URL for Bing search
+# Base URL for Bing search. Keep www.bing.com outside mainland China.
+# If your network redirects www.bing.com to cn.bing.com, set this explicitly.
 #BING_BASE_URL=https://www.bing.com
 
 # Listen address and port

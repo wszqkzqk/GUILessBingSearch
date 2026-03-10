@@ -49,7 +49,6 @@ import logging
 import platform
 import queue
 import random
-import re
 import signal
 import threading
 import time
@@ -87,8 +86,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("bing-search")
-
-_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 # PySide6 runJavaScript cannot marshal JS objects directly;
 # we JSON.stringify on the JS side instead.
@@ -152,25 +149,26 @@ class _SearchRequest:
 _search_queue: queue.Queue[_SearchRequest] = queue.Queue()
 
 
-def _has_chinese(text: str) -> bool:
-    return bool(_CJK_RE.search(text))
+def _resolve_ensearch() -> tuple[str, str, str]:
+    """Return (ensearch_url_value, form_code, mode_label).
 
-
-def _resolve_ensearch(query: str) -> tuple[str, str]:
-    """Return (ensearch_url_value, mode_label).
-
-    Returns "1" for international or "" for domestic (real browsers
-    never send ensearch=0, they simply omit the parameter).
-    Auto mode: CJK queries -> domestic, otherwise -> international.
+    `ensearch` is mainly relevant for cn.bing.com, where it selects the
+    international mode. For www.bing.com we keep the request in the normal
+    international flow and do not add `ensearch` unless the user explicitly
+    forces cn.bing.com behavior via BING_BASE_URL.
     """
-    if BING_ENSEARCH == "1":
-        return "1", "intl/forced"
+    hostname = (urlparse(BING_BASE_URL).hostname or "").lower()
+    is_cn_host = hostname == "cn.bing.com"
+
     if BING_ENSEARCH == "0":
-        return "", "local/forced"
-    # Auto: international for non-CJK, domestic for CJK
-    if _has_chinese(query):
-        return "", "local/auto"
-    return "1", "intl/auto"
+        return "", "QBLH", "local/forced"
+    if BING_ENSEARCH == "1":
+        return ("1", "QBLHCN", "intl/forced") if is_cn_host else (
+            "", "QBLHCN", "intl/forced",
+        )
+    if is_cn_host:
+        return "1", "QBLHCN", "intl/auto-cn"
+    return "", "QBLHCN", "intl/auto"
 
 
 def _decode_bing_redirect(url: str) -> str:
@@ -298,10 +296,8 @@ class BingEngine(QObject):
     def _navigate(self):
         assert self._current is not None
         q = quote_plus(self._current.query)
-        ensearch_param, mode = _resolve_ensearch(self._current.query)
-        # FORM codes from Bing's homepage: QBLHCN (intl), QBLH (domestic).
-        form_code = "QBLHCN" if ensearch_param == "1" else "QBLH"
-        params = [f"q={q}", f"FORM={form_code}"]
+        ensearch_param, form_code, mode = _resolve_ensearch()
+        params = [f"q={q}", f"form={form_code}"]
         if ensearch_param:
             params.append(f"ensearch={ensearch_param}")
         url = f"{BING_BASE_URL}/search?{'&'.join(params)}"
@@ -356,7 +352,7 @@ class BingEngine(QObject):
         self._current = None
         req.results = results
         req.done.set()
-        _, mode = _resolve_ensearch(req.query)
+        _, _, mode = _resolve_ensearch()
         log.info(
             "Query '%s' -> %d results (%s)",
             req.query, len(results), mode,
@@ -553,7 +549,8 @@ def main():
 
     log.info("Listening on http://%s:%d", args.host, args.port)
     log.info(
-        "  ensearch: %s, interval: %.1fs, auth: %s",
+        "  base: %s, ensearch: %s, interval: %.1fs, auth: %s",
+        BING_BASE_URL,
         {"1": "intl", "0": "local"}.get(BING_ENSEARCH, "auto"),
         SEARCH_INTERVAL,
         "enabled" if API_KEY else "disabled",
