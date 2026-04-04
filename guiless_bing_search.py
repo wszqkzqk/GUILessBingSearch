@@ -87,6 +87,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("bing-search")
 
+_MCP_PROTOCOL_VERSION = "2024-11-05"
+_MCP_MAX_RESULT_CHARS = 120000
+
 # PySide6 runJavaScript cannot marshal JS objects directly;
 # we JSON.stringify on the JS side instead.
 _EXTRACT_JS = """\
@@ -373,6 +376,31 @@ def scrape_bing(query: str, count: int = 10) -> list[dict]:
     return req.results
 
 
+def _format_results_markdown(results: list[dict]) -> str:
+    """Render search results to concise Markdown for MCP text output."""
+    if not results:
+        return "No results found."
+
+    lines: list[str] = []
+    for idx, item in enumerate(results, 1):
+        title = (item.get("title") or "").strip() or "(untitled)"
+        link = (item.get("link") or "").strip()
+        snippet = (item.get("snippet") or "").strip()
+
+        # Normalize whitespace: collapse newlines and multiple spaces into one.
+        snippet = " ".join(snippet.split())
+
+        if link:
+            lines.append(f"{idx}. [{title}]({link})")
+        else:
+            lines.append(f"{idx}. {title}")
+        if snippet:
+            lines.append(f"   * snippet: {snippet}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 class SearchHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         log.info(fmt, *args)
@@ -401,6 +429,174 @@ class SearchHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_empty(self, status: int = 204):
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_mcp_result(self, request_id, result):
+        self._send_json({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+    def _send_mcp_error(self, request_id, code: int, message: str, data=None):
+        error = {"code": code, "message": message}
+        if data is not None:
+            error["data"] = data
+        self._send_json({"jsonrpc": "2.0", "id": request_id, "error": error})
+
+    def _read_json_body(self) -> dict | None:
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._send_json({"error": "empty body"}, 400)
+            return None
+        try:
+            return json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send_json({"error": "invalid JSON"}, 400)
+            return None
+
+    @staticmethod
+    def _mcp_tools() -> list[dict]:
+        return [
+            {
+                "name": "search_bing",
+                "description": (
+                    "Search the web with Bing and return a structured list of results "
+                    "including title, URL, and snippet. Use the returned URLs to fetch "
+                    "full page content when more detail is needed."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query string.",
+                        },
+                        "count": {
+                            "type": "integer",
+                            "description": "Max number of results to return (1-30). Defaults to 5.",
+                            "minimum": 1,
+                            "maximum": 30,
+                        },
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                "_meta": {
+                    "anthropic/maxResultSizeChars": _MCP_MAX_RESULT_CHARS,
+                },
+            }
+        ]
+
+    def _mcp_call_search_bing(self, params: dict) -> dict:
+        name = params.get("name")
+        if name != "search_bing":
+            raise ValueError("unknown tool name")
+
+        arguments = params.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValueError("arguments must be an object")
+
+        query = arguments.get("query")
+        if not isinstance(query, str):
+            raise ValueError("arguments.query must be a string")
+        query = query.strip()
+        if not query:
+            raise ValueError("arguments.query is required")
+
+        count = arguments.get("count", 5)
+        if not isinstance(count, int):
+            raise ValueError("arguments.count must be an integer")
+        if count < 1 or count > 30:
+            raise ValueError("arguments.count must be in range [1, 30]")
+
+        log.info("MCP search_bing: query='%s', count=%d", query, count)
+        results = scrape_bing(query, count)
+        markdown = _format_results_markdown(results)
+
+        return {
+            "content": [{"type": "text", "text": markdown}],
+            "structuredContent": {
+                "query": query,
+                "count": count,
+                "results": results,
+            },
+            "isError": False,
+        }
+
+    def _handle_mcp(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self._send_mcp_error(None, -32600, "Invalid Request", {"reason": "empty body"})
+            return
+
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send_mcp_error(None, -32700, "Parse error")
+            return
+
+        if not isinstance(body, dict):
+            self._send_mcp_error(None, -32600, "Invalid Request")
+            return
+
+        has_id = "id" in body
+        request_id = body.get("id")
+        method = body.get("method")
+        params = body.get("params", {})
+
+        if body.get("jsonrpc") != "2.0" or not isinstance(method, str) or not method:
+            self._send_mcp_error(request_id if has_id else None, -32600, "Invalid Request")
+            return
+
+        if not isinstance(params, dict):
+            if has_id:
+                self._send_mcp_error(request_id, -32602, "Invalid params", {"reason": "params must be an object"})
+            else:
+                self._send_empty()
+            return
+
+        # Ignore JSON-RPC notifications unless explicitly needed.
+        if not has_id:
+            self._send_empty()
+            return
+
+        if method == "initialize":
+            self._send_mcp_result(
+                request_id,
+                {
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {
+                        "name": "guiless-bing-search",
+                        "version": "0.1.0",
+                    },
+                },
+            )
+            return
+
+        if method == "ping":
+            self._send_mcp_result(request_id, {})
+            return
+
+        if method == "notifications/initialized":
+            self._send_mcp_result(request_id, {})
+            return
+
+        if method == "tools/list":
+            self._send_mcp_result(request_id, {"tools": self._mcp_tools()})
+            return
+
+        if method == "tools/call":
+            try:
+                result = self._mcp_call_search_bing(params)
+            except ValueError as e:
+                self._send_mcp_error(request_id, -32602, "Invalid params", {"reason": str(e)})
+                return
+            self._send_mcp_result(request_id, result)
+            return
+
+        self._send_mcp_error(request_id, -32601, "Method not found")
+
     def do_GET(self):
         if self.path == "/health":
             self._send_json({"status": "ok"})
@@ -412,18 +608,19 @@ class SearchHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._check_auth():
             return
+
+        if self.path in ("/mcp", "/mcp/"):
+            self._handle_mcp()
+            return
+
         if self.path != "/search":
             self._send_json({"error": "not found"}, 404)
             return
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            self._send_json({"error": "empty body"}, 400)
+
+        body = self._read_json_body()
+        if body is None:
             return
-        try:
-            body = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
-            self._send_json({"error": "invalid JSON"}, 400)
-            return
+
         query = body.get("query", "").strip()
         count = body.get("count", 5)
         if not query:
