@@ -164,10 +164,10 @@ Claude Code example:
 
 ```bash
 # no auth
-claude mcp add --transport http bing-search http://127.0.0.1:8765/mcp
+claude mcp add --transport http web-search http://127.0.0.1:8765/mcp
 
 # if server uses --api-key
-claude mcp add --transport http bing-search http://127.0.0.1:8765/mcp \
+claude mcp add --transport http web-search http://127.0.0.1:8765/mcp \
   --header "Authorization: Bearer mysecretkey"
 ```
 
@@ -178,7 +178,7 @@ These files are user-managed and are not auto-created by package installation.
 - **Project-scoped**: create `.mcp.json` in your project root.
 - **User-scoped (global)**: configure `~/.claude.json` under `mcpServers`, or run:
   ```bash
-  claude mcp add --transport http --scope user bing-search http://127.0.0.1:8765/mcp
+  claude mcp add --transport http --scope user web-search http://127.0.0.1:8765/mcp
   ```
 
 Example `.mcp.json` (project-scoped):
@@ -186,7 +186,7 @@ Example `.mcp.json` (project-scoped):
 ```json
 {
   "mcpServers": {
-    "bing-search": {
+    "web-search": {
       "type": "http",
       "url": "${BING_SEARCH_MCP_URL:-http://127.0.0.1:8765/mcp}",
       "headers": {
@@ -203,7 +203,7 @@ OpenCode config (`opencode.json` in project root, or `~/.config/opencode/opencod
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "bing_search": {
+    "web_search": {
       "type": "remote",
       "url": "http://127.0.0.1:8765/mcp",
       "enabled": true,
