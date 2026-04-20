@@ -6,7 +6,7 @@ In many server, container, or embedded environments there is no desktop or brows
 
 Because no result links are fed back to Bing, the tool does not leak which results the user actually visited, offering a degree of privacy protection compared to using a regular browser.
 
-**Disclaimer:** This tool is intended strictly for manual, interactive use via command-line interfaces (CLI) by individual users. It is not designed, authorized, or intended for automated scraping, bulk data extraction, or any high-frequency programmatic access. Any use of this tool for automated data collection or other purposes that violate the Terms of Service of the target search engine is strictly prohibited. The user assumes full responsibility for ensuring their use of this tool complies with all applicable laws and terms of service.
+**Disclaimer:** This tool is an independent, unofficial project created for educational purposes, personal accessibility, and academic research on headless information retrieval. It acts as a local browser wrapper to facilitate personal workflows and interoperability. It is not intended for bulk scraping, commercial use, or bypassing of any official APIs. Users are encouraged to respect fair use principles and the terms of service of the websites they access.
 
 ## Dependencies
 
@@ -129,22 +129,96 @@ platform-appropriate user data directory:
 
 Override with `--profile-dir` for portability.
 
-## OpenWebUI Integration (For study and research purposes only)
+## OpenWebUI Integration
 
-While this tool is designed for manual CLI usage, its standard HTTP JSON interface means it *technically* can be connected to other local tools, such as [OpenWebUI](https://github.com/open-webui/open-webui) for study and research purpose such as debugging the format of search results.
+While this tool is primarily designed for CLI usage, its standard HTTP JSON interface allows for local interoperability with other tools, such as [OpenWebUI](https://github.com/open-webui/open-webui).
 
-> **⚠️ STRICT LIABILITY WARNING:** 
+> **Note on Interoperability**
 > 
-> **The author explicitly disclaims any endorsement of using this tool as a LLM search backend.** Doing so may rapidly trigger anti-bot protections, result in IP/account bans, and violate the target search engine's **Terms of Service**.
-> 
-> If you choose to configure this integration for your personal, low-frequency local testing, **you do so entirely at your own risk**.
+> Connecting this tool to local frontends is provided as an example of personal workflow enhancement. This setup is intended for low-frequency, local debugging and study purposes. It is not a replacement for commercial search APIs, and users should ensure their usage respects fair use guidelines.
 
-If you understand and accept these risks, the technical configuration in **Admin Panel > Settings > Web Search** is:
+If you choose to configure this integration, the technical configuration in **Admin Panel > Settings > Web Search** is:
 
 1. **Web Search Engine**: select `external`
 2. **External Search URL**: `http://127.0.0.1:8765/search`
 3. **External Search API Key**: your `API_KEY` value if configured, or any
    non-empty string if not
+
+## MCP integration
+
+> **Note on MCP Integration**
+>
+> The built-in MCP (Model Context Protocol) endpoint demonstrates local interoperability between headless browsers and AI agents for personal, low-frequency workflows. This integration allows individuals to streamline their daily research tasks in a privacy-respecting manner.
+>
+> It is provided strictly as an educational example of local agent integration. For any commercial or production-grade automated search workflows, please use the official [Grounding with Bing Search API](https://www.microsoft.com/en-us/bing/apis).
+
+The built-in MCP endpoint (`/mcp`) reuses the same running server process.
+No extra wrapper process is required.
+MCP uses the same Bearer authentication as `/search`.
+
+Available MCP tool:
+- `search_bing` with input `{ "query": "...", "count": 5 }`
+- Returns rendered Markdown text with search results
+
+Claude Code example:
+
+```bash
+# no auth
+claude mcp add --transport http bing-search http://127.0.0.1:8765/mcp
+
+# if server uses --api-key
+claude mcp add --transport http bing-search http://127.0.0.1:8765/mcp \
+  --header "Authorization: Bearer mysecretkey"
+```
+
+Optional Claude Code config:
+
+These files are user-managed and are not auto-created by package installation.
+
+- **Project-scoped**: create `.mcp.json` in your project root.
+- **User-scoped (global)**: configure `~/.claude.json` under `mcpServers`, or run:
+  ```bash
+  claude mcp add --transport http --scope user bing-search http://127.0.0.1:8765/mcp
+  ```
+
+Example `.mcp.json` (project-scoped):
+
+```json
+{
+  "mcpServers": {
+    "bing-search": {
+      "type": "http",
+      "url": "${BING_SEARCH_MCP_URL:-http://127.0.0.1:8765/mcp}",
+      "headers": {
+        "Authorization": "Bearer ${BING_SEARCH_API_KEY:-}"
+      }
+    }
+  }
+}
+```
+
+OpenCode config (`opencode.json` in project root, or `~/.config/opencode/opencode.json` for global user config):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "bing_search": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8765/mcp",
+      "enabled": true,
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:BING_SEARCH_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Hardcoded values are also valid in both configs, for example: `"Authorization": "Bearer mysecretkey"`.
+
+When auth is disabled, the `Authorization` header can be omitted.
 
 ## systemd Deployment
 
